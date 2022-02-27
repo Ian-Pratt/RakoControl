@@ -5,25 +5,16 @@ import datetime
 import ephem
 import time
 import threading
-
 import pdpyras
 
-def convert_to_hex(NUMBER):
-
-        hex_num = hex(NUMBER)
-        print(type(hex_num))
-        #hex_num = hex_num.split("x", 1)[1]
-        print(type(hex_num))
-        return hex_num
-
 alarm_delay = 10
-
 
 UDP_IP = "0.0.0.0"
 BRIDGE_IP = '192.168.1.34'
 PORT = 9761
 URL = 'http://' + BRIDGE_IP +'/rako.xml'
 
+routing_key = 'R03DGSERQAG8S08Y18MMNQ8WSP33ND5H'
 
 import xmltodict
 import urllib.request
@@ -53,28 +44,31 @@ for room in dict['rako']['rooms']['Room'] :
 
     xrooms[int(room['@id'])]=room_name
 
+
 def listening():
-    
-
-                            
-
     soc = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
-
     soc.bind((UDP_IP, PORT))
-
     soc.settimeout(1.0)
 
-    obs = ephem.Observer()
-    obs.lat = "52.2053"
-    obs.long="0.1218"
-
-    obs.date= ('2022/1/1 18:00')
-
-    print( obs.previous_rising(ephem.Sun()).datetime(), obs.next_setting(ephem.Sun()).datetime() )
+    #obs = ephem.Observer()
+    #obs.lat = "52.2053"
+    #obs.long="0.1218"
+    #obs.date= ('2022/1/1 18:00')
+    #print( obs.previous_rising(ephem.Sun()).datetime(), obs.next_setting(ephem.Sun()).datetime() 
+               
     global data 
 
-    while True:
-        log_file = open("log.txt", "a")
+    log_file = open("log.txt", "a")
+
+        
+    sounding = False
+    event_key = ''
+    log_session = pdpyras.ChangeEventsAPISession(routing_key)
+    event_session = pdpyras.EventsAPISession(routing_key)
+    resp = ''
+        
+        
+    while True:    
         try:
             data, addr = soc.recvfrom(1024)
             
@@ -82,23 +76,11 @@ def listening():
             if addr[0] != BRIDGE_IP:
                 continue
 
-            #print(addr, len(data), data[0], data[0] == 0x53)
-
             if len(data) >=9 and data[0] == 0x53 :
-
                 room = data[2] * 256 + data[3]
                 channel = data[4]
                 command= data[5]
                 val = data[7]
-
-                
-                sounding = False
-                event_key = ''
-                routing_key = 'R03DGSERQAG8S08Y18MMNQ8WSP33ND5H'
-                log_session = pdpyras.ChangeEventsAPISession(routing_key)
-                event_session = pdpyras.EventsAPISession(routing_key)
-                resp = ''
-
                 
                 if command == 0x31:
                     crc = 0
@@ -118,14 +100,11 @@ def listening():
                         log_file.write( entry + "\n")
 
                         if room == 23:
-
-                            if val == 4:
-
+                            if val == 4:   # scene 4 is Alarm is Set
                                 print("set")
                                 resp = log_session.submit("Alarm set", 'Elmhurst')
 
-                            elif val == 0:
-                                
+                            elif val == 0:    # Alarm is unset
                                 if sounding == True:
                                     event_session.resolve(event_key)
                                     print("resolve", event_key)
@@ -134,7 +113,7 @@ def listening():
                                 resp = log_session.submit("Alarm unset", 'Elmhurst')
                                 sounding = False
 
-                            elif val == 1:
+                            elif val == 1:    # Alarm sounding
                                 goingoffThread = threading.Thread(target=alarm_GoingOff, args=(4,)) 
                                 goingoffThread.start()
                                 sounding = True
