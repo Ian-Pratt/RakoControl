@@ -2,9 +2,8 @@ import socket
 import random
 import http.client
 import datetime
-import ephem
+#import ephem
 import time
-import threading
 import pdpyras
 
 alarm_delay = 10
@@ -56,12 +55,11 @@ def listening():
     #obs.date= ('2022/1/1 18:00')
     #print( obs.previous_rising(ephem.Sun()).datetime(), obs.next_setting(ephem.Sun()).datetime() 
                
-    global data 
+    #global data 
 
     log_file = open("log.txt", "a")
-
         
-    sounding = False
+    holdoff=0
     event_key = ''
     log_session = pdpyras.ChangeEventsAPISession(routing_key)
     event_session = pdpyras.EventsAPISession(routing_key)
@@ -75,6 +73,8 @@ def listening():
             #print("recieved message:", addr, data)
             if addr[0] != BRIDGE_IP:
                 continue
+                
+            t=datetime.datetime.utcnow()
 
             if len(data) >=9 and data[0] == 0x53 :
                 room = data[2] * 256 + data[3]
@@ -92,8 +92,6 @@ def listening():
                         except:
                             roomname = "__"
 
-                        t=datetime.datetime.utcnow()
-
                         entry = "room=%d %s channel=%d command=%d value = %d  time = %s" % (room, roomname,channel,command,val, t.replace(tzinfo=datetime.timezone.utc).astimezone().isoformat(timespec='seconds') )
                         print(entry)
                         
@@ -105,18 +103,17 @@ def listening():
                                 resp = log_session.submit("Alarm set", 'Elmhurst')
 
                             elif val == 0:    # Alarm is unset
-                                if sounding == True:
+                                if event_key:
                                     event_session.resolve(event_key)
                                     print("resolve", event_key)
-
+                                    event_key = ''
+                                    
                                 print("unset")
                                 resp = log_session.submit("Alarm unset", 'Elmhurst')
-                                sounding = False
+                                holdoff = 0
 
                             elif val == 1:    # Alarm sounding
-                                goingoffThread = threading.Thread(target=alarm_GoingOff, args=(4,)) 
-                                goingoffThread.start()
-                                sounding = True
+                                holdoff = alarm_delay
 
                                 if timerCompleted == True and sounding == True :
                                     event_key = event_session.trigger("Alarm is Sounding!", 'Elmhurst')
@@ -130,22 +127,21 @@ def listening():
 
             else:
                 print("XXX", data)
-            log_file.close()
+    
         except:
             print(datetime.datetime.utcnow())
+            
+        if holdoff:  # XXXX this is a bit crude as incoming events will cause us to go through the loop quicker
+            --holdoff
+            if holdoff == 0:
+                event_key = event_session.trigger("Alarm is Sounding!", 'Elmhurst')
 
-
-def alarm_GoingOff():
-    timerCompleted = False
-    time.sleep(alarm_delay)
-    timercompleted = True
-
-try:
-    New_thread = threading.Thread(target = listening)
-    New_thread.start()
-except:
-    print("unable to start a new thread")
-    quit()
+while True:                
+    try:
+        listening()
+    except:
+        print("err?")
+        sleep(10)
 
 def set_scene( room, channel, scene):
 
