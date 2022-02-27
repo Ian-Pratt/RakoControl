@@ -75,6 +75,7 @@ def listening():
                 continue
                 
             t=datetime.datetime.utcnow()
+            T=t.replace(tzinfo=datetime.timezone.utc).astimezone().isoformat(timespec='seconds')
 
             if len(data) >=9 and data[0] == 0x53 :
                 room = data[2] * 256 + data[3]
@@ -92,55 +93,56 @@ def listening():
                         except:
                             roomname = "__"
 
-                        entry = "room=%d %s channel=%d command=%d value = %d  time = %s" % (room, roomname,channel,command,val, t.replace(tzinfo=datetime.timezone.utc).astimezone().isoformat(timespec='seconds') )
+                        entry = "%s room=%d %s channel=%d command=%d value=%d  time = %s" % (T, room, roomname,channel,command,val )
                         print(entry)
-                        
                         log_file.write( entry + "\n")
 
                         if room == 23:
                             if val == 4:   # scene 4 is Alarm is Set
-                                print("set")
+                                print(T, "alarm_set")
                                 resp = log_session.submit("Alarm set", 'Elmhurst')
 
                             elif val == 0:    # Alarm is unset
                                 if event_key:
                                     event_session.resolve(event_key)
-                                    print("resolve", event_key)
+                                    print(T, "resolve", event_key)
                                     event_key = ''
                                     
-                                print("unset")
+                                print(T, "alarm_unset")
                                 resp = log_session.submit("Alarm unset", 'Elmhurst')
                                 holdoff = 0
 
                             elif val == 1:    # Alarm sounding
-                                holdoff = alarm_delay
-
-                                if timerCompleted == True and sounding == True :
-                                    event_key = event_session.trigger("Alarm is Sounding!", 'Elmhurst')
+                                print(T, "alarm_sounding")
+                                holdoff = t + datetime.timedelta(seconds=alarm_delay)
                             else:
-                                print("unknown")
+                                print(T,"alarm_unknown")
 
                     else:
-                        print("ZZZ", data)
+                        print(T,"CRC_fail", data)
                 else:
-                    print("YYY", data)
+                    print(T,"not_set_scene", command, data)
 
             else:
-                print("XXX", data)
+                print(T,"not_status_update", data)
     
         except:
-            print(datetime.datetime.utcnow())
+            print(T,"parsing_exception",data)
             
-        if holdoff:  # XXXX this is a bit crude as incoming events will cause us to go through the loop quicker
-            --holdoff
-            if holdoff == 0:
-                event_key = event_session.trigger("Alarm is Sounding!", 'Elmhurst')
-
+        if holdoff and t > holdoff:
+            print(T,"send_pagerduty_trigger")
+            event_key = event_session.trigger("Alarm is Sounding!", 'Elmhurst')
+            holdoff = 0
+            
+        # bottom of main while loop
+        
 while True:                
     try:
-        listening()
+        listening()  # just restart the listening loop if there are random failures
     except:
-        print("err?")
+        t=datetime.datetime.utcnow()
+        T=t.replace(tzinfo=datetime.timezone.utc).astimezone().isoformat(timespec='seconds')
+        print(T,"exception_restart")
         sleep(10)
 
 def set_scene( room, channel, scene):
